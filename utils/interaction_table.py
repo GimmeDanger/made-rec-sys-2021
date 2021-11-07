@@ -33,7 +33,13 @@ def clicks_weigher(clicks_df, max_clicks_per_session = 100):
     # create table (user_id, chain_id) -> weight
     clicks_df['weight'] = 1
     clicks_df = clicks_df.groupby(['user_id', 'chain_id']).sum()
-    return clicks_df.reset_index()[['user_id', 'chain_id', 'weight']]
+    clicks_df = clicks_df.reset_index()
+    clicks_df = clicks_df[['user_id', 'chain_id', 'weight']]
+    clicks_df['weight'] /= clicks_df['weight'].max()
+    
+    if clicks_df['weight'].min() < 0 or clicks_df['weight'].max() > 1:
+        raise RuntimeError("Invalid input: clicks weight must be in [0, 1]")
+    return clicks_df
 
 
 def orders_weigher(orders_df, max_orders_per_chain = 50):
@@ -52,15 +58,37 @@ def orders_weigher(orders_df, max_orders_per_chain = 50):
     orders_df = orders_df.reset_index()[['user_id', 'chain_id', 'weight']]
     orders_df = orders_df.drop(orders_df[orders_df.weight > max_orders_per_chain].index)
     orders_df = orders_df.drop(orders_df[orders_df.user_id < 0].index)
+    orders_df['weight'] /= orders_df['weight'].max()
+    
+    if orders_df['weight'].min() < 0 or orders_df['weight'].max() > 1:
+        raise RuntimeError("Invalid input: orders weight must be in [0, 1]")
     return orders_df
 
 
 class InteractionTable:
     
-    def __init__(self, clicks_getter, orders_getter, clicks_weigher, orders_weigher):
-        clicks_df = self.load(clicks_getter, clicks_weigher, 'Clicks')
-        orders_df = self.load(orders_getter, orders_weigher, 'Orders')
-        self.interaction_df = pd.concat([clicks_df, orders_df], ignore_index=True)
+    """
+    weight = alpha * click_weight + (1 - alpha) * orders_weight
+    alpha in [0, 1], click_weight in [0, 1], orders_weight in [0, 1]
+    so final weight in (0, 1]
+    """
+    def __init__(self, clicks_getter, orders_getter, clicks_weigher, orders_weigher, alpha):
+
+        if alpha < 0 or alpha > 1:
+            raise RuntimeError("Invalid input: alpha must be in [0, 1]")
+            
+        self.alpha = alpha
+        self.clicks_df = self.load(clicks_getter, clicks_weigher, 'Clicks')
+        self.clicks_df['weight'] *= self.alpha
+        
+        self.orders_df = self.load(orders_getter, orders_weigher, 'Orders')
+        self.orders_df['weight'] *= (1 - self.alpha)
+        
+        self.interaction_df = pd.concat([self.clicks_df, self.orders_df], ignore_index=True)
+        self.chain_index = self.get_uniqs_index(self.interaction_df.chain_id)
+        self.r_chain_index = sorted(self.interaction_df.chain_id.unique())
+        self.user_index = self.get_uniqs_index(self.interaction_df.user_id)
+        self.r_user_index = sorted(self.interaction_df.user_id.unique())
         self.sparse_interaction_matrix = self.get_sparse_interaction_matrix(self.interaction_df)
     
     def load(self, getter, weigher, label):
@@ -91,3 +119,11 @@ class InteractionTable:
         sparse_matrix = csr_matrix((df.weight, (row, col)), \
                                    shape=(chain_c.categories.size, user_c.categories.size))
         return sparse_matrix
+    
+    def get_uniqs_index(self, df_column):
+        """
+        mapping ids (user or chain) -> uniq id starting from 0
+        """
+        uniqs = sorted(df_column.unique())
+        uniqs_index = dict(zip(uniqs, [x for x in range(len(uniqs))]))
+        return uniqs_index

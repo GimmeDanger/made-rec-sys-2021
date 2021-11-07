@@ -1,3 +1,3 @@
-from .interaction_table import get_clicks, get_orders, clicks_weigher, orders_weigher, InteractionTable
+from .interaction_table import clicks_weigher, orders_weigher, InteractionTable
 
-__all__ = ['get_clicks', 'get_orders', 'clicks_weigher', 'orders_weigher', 'InteractionTable']
+__all__ = ['clicks_weigher', 'orders_weigher', 'InteractionTable']
