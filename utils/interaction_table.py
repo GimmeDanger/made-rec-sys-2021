@@ -3,17 +3,6 @@ import numpy as np
 from scipy.sparse import csr_matrix
 from pandas.api.types import CategoricalDtype
 
-# TODO: replace with filtered datasets
-
-def get_clicks():
-    path = '../data/clicks/click.pkl'
-    return pd.read_pickle(path)
-
-
-def get_orders():
-    path = '../data/orders/orders.pkl'
-    return pd.read_pickle(path)
-
 
 def clicks_weigher(clicks_df, max_clicks_per_session = 100):
     """
@@ -72,29 +61,35 @@ class InteractionTable:
     alpha in [0, 1], click_weight in [0, 1], orders_weight in [0, 1]
     so final weight in (0, 1]
     """
-    def __init__(self, clicks_getter, orders_getter, clicks_weigher, orders_weigher, alpha):
+    def __init__(self, clicks_getter, orders_getter, clicks_weigher, orders_weigher, alpha=0):
 
         if alpha < 0 or alpha > 1:
             raise RuntimeError("Invalid input: alpha must be in [0, 1]")
             
         self.alpha = alpha
-        self.clicks_df = self.load(clicks_getter, clicks_weigher, 'Clicks')
-        self.clicks_df['weight'] *= self.alpha
+        self.clicks_df = pd.DataFrame()
+        self.orders_df = pd.DataFrame()
         
-        self.orders_df = self.load(orders_getter, orders_weigher, 'Orders')
-        self.orders_df['weight'] *= (1 - self.alpha)
+        if clicks_getter is not None:
+            self.clicks_df = self.load(clicks_getter, clicks_weigher, 'Clicks')
+            self.clicks_df['weight'] *= self.alpha
+        
+        if orders_getter is not None:
+            self.orders_df = self.load(orders_getter, orders_weigher, 'Orders')
+            self.orders_df['weight'] *= (1 - self.alpha)
         
         self.interaction_df = pd.concat([self.clicks_df, self.orders_df], ignore_index=True)
+        
         self.chain_index = self.get_uniqs_index(self.interaction_df.chain_id)
         self.r_chain_index = sorted(self.interaction_df.chain_id.unique())
+        
         self.user_index = self.get_uniqs_index(self.interaction_df.user_id)
         self.r_user_index = sorted(self.interaction_df.user_id.unique())
+        
         self.sparse_interaction_matrix = self.get_sparse_interaction_matrix(self.interaction_df)
     
     def load(self, getter, weigher, label):
         df = getter()
-        if 'user_id' not in df.columns:
-            df['user_id'] = df['customer_id'].astype('int64')
         print(f'{label} df loaded: size={len(df)},',
               f' uniq_users={len(df.user_id.unique())},',
               f' uniq_chains={len(df.chain_id.unique())}')
