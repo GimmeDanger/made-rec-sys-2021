@@ -3,8 +3,8 @@ import pandas as pd
 from collections import Counter
 from process_data import reduce_mem_usage
 
-PATH_TO_CHAIN = 'C:\MADE\made-rec-sys-2021\ml-entry-exam-notebooks\data\chains.pkl'
-PATH_TO_ORDERS = 'C:\MADE\made-rec-sys-2021\ml-entry-exam-notebooks\data\orders'
+PATH_TO_CHAIN = '../data/chains.pkl'
+PATH_TO_ORDERS = '../data/orders'
 
 
 def chains_eda() -> pd.DataFrame:
@@ -28,7 +28,6 @@ def chains_eda() -> pd.DataFrame:
     )
     orders_group_df.rename({'index': 'num_orders'}, axis=1, inplace=True)
     orders_group_df.loc[:, 'discount_value'] = orders_group_df.discount_value / orders_group_df.initial_product_sum
-    print("chain")
     chains_df = pd.read_pickle(PATH_TO_CHAIN)
     chains_df, _ = reduce_mem_usage(chains_df)
     chains_df.drop(
@@ -71,5 +70,4 @@ def chains_eda() -> pd.DataFrame:
     df.loc[:, 'order_per_vendor'] = df.num_orders / df.vendors_in_chain
     return df
 
-
-df = chains_eda()
+# df = chains_eda()
