@@ -4,9 +4,14 @@ from collections import Counter
 from process_data import reduce_mem_usage
 import os
 
-def chains_eda(orders_df, chains_df) -> pd.DataFrame:
-    
-    orders = orders_df[orders_df.status_id == 11]
+def chains_eda(orders_df, chains_df, num_orders=1) -> pd.DataFrame:
+    """
+    num_orders - количество заказов по которому отсекаем рестораны
+    orders_df - таблица с заказами
+    chaind_df - таблица с ресторанами
+    """
+    orders = orders_df.copy()
+    orders = orders[orders.status_id == 11]
     chains = chains_df.copy()
     orders_group_df = orders_df \
         .groupby('chain_id') \
@@ -18,7 +23,7 @@ def chains_eda(orders_df, chains_df) -> pd.DataFrame:
          }
     )
     orders_group_df.rename({'index': 'num_orders'}, axis=1, inplace=True)
-    orders_group_df = orders_group_df[orders_group_df.num_orders != 1]
+    orders_group_df = orders_group_df[orders_group_df.num_orders > num_orders]
     orders_group_df.loc[:, 'discount_value'] = orders_group_df.discount_value / orders_group_df.initial_product_sum
 
     chains.drop(
@@ -30,6 +35,11 @@ def chains_eda(orders_df, chains_df) -> pd.DataFrame:
         chains[chains.is_test_chain == 1].index,
         axis=0,
         inplace=True,
+    )
+    chains.drop(
+    chains[chains.is_qsr == 1].index,
+    axis=0,
+    inplace=True,
     )
     chains = chains[chains.category_id == 1]
     
@@ -62,3 +72,5 @@ def chains_eda(orders_df, chains_df) -> pd.DataFrame:
     df = chains_group_df.join(orders_group_df, how='inner')
     df.loc[:, 'order_per_vendor'] = df.num_orders / df.vendors_in_chain
     return df
+
+
