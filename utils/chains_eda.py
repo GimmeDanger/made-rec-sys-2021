@@ -1,31 +1,31 @@
 import numpy as np
 import pandas as pd
 from collections import Counter
-from process_data import reduce_mem_usage
 import os
 
-def chains_eda(orders_df, chains_df, num_orders=1) -> pd.DataFrame:
+def chains_eda(orders_df, chains_df) -> pd.DataFrame:
     """
     num_orders - количество заказов по которому отсекаем рестораны
     orders_df - таблица с заказами
     chaind_df - таблица с ресторанами
     """
     orders = orders_df.copy()
-    orders = orders[orders.status_id == 11]
     chains = chains_df.copy()
+    
     orders_group_df = orders_df \
         .groupby('chain_id') \
         .agg(
         {'discount_value': np.mean,
          'total_value': np.mean,
          'initial_product_sum': np.mean,
+         'discount_percent': np.mean,
+         'fee_precent': np.mean,
          'index': len
          }
     )
     orders_group_df.rename({'index': 'num_orders'}, axis=1, inplace=True)
-    orders_group_df = orders_group_df[orders_group_df.num_orders > num_orders]
-    orders_group_df.loc[:, 'discount_value'] = orders_group_df.discount_value / orders_group_df.initial_product_sum
-
+    
+    # TODO: сделать отдельную функцию фильтрации для chains
     chains.drop(
         chains[chains.chain_id.isna()].index,
         axis=0,

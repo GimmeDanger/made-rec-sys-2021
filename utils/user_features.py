@@ -1,31 +1,21 @@
 import pandas as pd
+from typing import List
 
 
 def generate_user_features(
-    orders: pd.DataFrame, clicks: pd.DataFrame
+    orders: pd.DataFrame,
+    clicks: pd.DataFrame,
+    valid_status_ids: List[int] = [11, 18]
 ) -> pd.DataFrame:
     """
     Generate user features DataFrame from clicks and orders
     """
     
-    orders['discount_percent'] = orders["discount_value"] / orders["initial_product_sum"]
-    orders['fee_percent'] = (orders["delivery_fee"] + orders["service_fee"]) / orders["total_value"]
-
     user_features = pd.DataFrame(columns=['user_id'])
     user_features['user_id'] = list(set(
         orders["customer_id"].to_list() + clicks["user_id"].to_list()
     ))
     user_features = user_features.set_index('user_id')
-    
-    for delivery_type in orders["delivery_type"].unique():
-        user_features[
-            f"{str.lower(delivery_type)}_percent"
-        ] = orders[orders["delivery_type"] == delivery_type].groupby(
-            "customer_id", sort=False
-        ).size().div(
-            orders.groupby("customer_id", sort=False).size(),
-            fill_value=0.
-        )
         
     for status_id in orders["status_id"].unique():
         user_features[
@@ -37,6 +27,19 @@ def generate_user_features(
             fill_value=0.
         )
     
+    for delivery_type in orders["delivery_type"].unique():
+        user_features[
+            f"{str.lower(delivery_type)}_percent"
+        ] = orders[
+            (orders["delivery_type"] == delivery_type)
+            & (orders.status_id.isin(valid_status_ids))
+        ].groupby(
+            "customer_id", sort=False
+        ).size().div(
+            orders.groupby("customer_id", sort=False).size(),
+            fill_value=0.
+        )
+        
     for col in [
         'expected_delivery_min',
         'products_count',
@@ -50,11 +53,11 @@ def generate_user_features(
         'discount_percent',
         'fee_percent'
     ]:
-        user_features[f"{col}_mean"] = orders.groupby(
+        user_features[f"{col}_mean"] = orders[orders.status_id.isin(valid_status_ids)].groupby(
             "customer_id", sort=False
         )[col].mean() 
     
-    user_features["order_cnt"] = orders.groupby(
+    user_features["order_cnt"] = orders[orders.status_id.isin(valid_status_ids)].groupby(
             "customer_id", sort=False
     ).size()
     
