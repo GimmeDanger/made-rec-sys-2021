@@ -12,7 +12,7 @@ def clicks_weigher(clicks_df):
     return None
 
 
-def orders_weigher(orders_df, normalize=True):
+def orders_weigher(orders_df, normalize=False):
     """
     (chain, user) -> interaction weight
     """
