@@ -5,14 +5,25 @@ from scipy.sparse import csr_matrix
 from pandas.api.types import CategoricalDtype
 
 
-def clicks_weigher(clicks_df):
+def ncf_clicks_weigher(clicks_df):
     """
     (chain, user) -> interaction weight
     """
-    return None
+    clicks_df['weight'] = 1
+    clicks_df = clicks_df[['user_id', 'chain_id', 'weight']]
+    return clicks_df
 
 
-def orders_weigher(orders_df, normalize=False):
+def ncf_orders_weigher(orders_df):
+    """
+    (chain, user) -> interaction weight
+    """
+    orders_df['weight'] = 1
+    orders_df = orders_df[['user_id', 'chain_id', 'weight']]
+    return orders_df
+
+
+def orders_weigher_sum(orders_df, normalize=False):
     """
     (chain, user) -> interaction weight
     """
