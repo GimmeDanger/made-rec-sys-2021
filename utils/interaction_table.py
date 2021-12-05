@@ -39,6 +39,9 @@ def orders_weigher(orders_df, normalize=False):
     assert len(orders_df) == len(user_chain_stats)
     assert orders_df.weight.isnull().sum() == 0
     print(orders_df.describe())
+    print(f'Orders df weighted: size={len(orders_df)},',
+          f'uniq_users={len(orders_df.user_id.unique())},',
+          f'uniq_chains={len(orders_df.chain_id.unique())}')
     return orders_df
 
 
@@ -49,7 +52,7 @@ class InteractionTable:
     alpha in [0, 1], click_weight in [0, 1], orders_weight in [0, 1]
     so final weight in (0, 1]
     """
-    def __init__(self, clicks_getter, orders_getter, clicks_weigher, orders_weigher, alpha=0, test_slice=None):
+    def __init__(self, orders_df, clicks_df, alpha=0, test_slice=None):
 
         if alpha < 0 or alpha > 1:
             raise RuntimeError("Invalid input: alpha must be in [0, 1]")
@@ -58,12 +61,12 @@ class InteractionTable:
         self.clicks_df = pd.DataFrame()
         self.orders_df = pd.DataFrame()
         
-        if clicks_getter is not None:
-            self.clicks_df = self.load(clicks_getter, clicks_weigher, 'Clicks')
+        if clicks_df is not None:
+            self.clicks_df = clicks_weigher(clicks_df, normalize=False)
             self.clicks_df['weight'] *= self.alpha
         
-        if orders_getter is not None:
-            self.orders_df = self.load(orders_getter, orders_weigher, 'Orders')
+        if orders_df is not None:
+            self.orders_df = orders_weigher(orders_df, normalize=False)
             self.orders_df['weight'] *= (1 - self.alpha)
         
         self.interaction_df = pd.concat([self.clicks_df, self.orders_df], ignore_index=True)
@@ -72,27 +75,29 @@ class InteractionTable:
             uniq_users = self.interaction_df.user_id.unique()
             random.Random(42).shuffle(uniq_users)
             test_users = uniq_users[:test_slice]
-            self.interaction_df = self.interaction_df.query('user_id in @test_users')
+            self.interaction_df = self.interaction_df[self.interaction_df["user_id"].isin(test_users)]
             print('Interaction df len for test: ', len(self.interaction_df))
         
-        self.chain_index = self.get_uniqs_index(self.interaction_df.chain_id)
-        self.r_chain_index = sorted(self.interaction_df.chain_id.unique())
+        self.chain_to_index = self.get_uniqs_index(self.interaction_df.chain_id)
+        self.r_chain_index = list(self.chain_to_index.keys())
+        self.index_to_chain = {v: k for k, v in self.chain_to_index.items()}
         
-        self.user_index = self.get_uniqs_index(self.interaction_df.user_id)
-        self.r_user_index = sorted(self.interaction_df.user_id.unique())
+        self.user_to_index = self.get_uniqs_index(self.interaction_df.user_id)
+        self.r_user_index = list(self.user_to_index.keys())
+        self.index_to_user = {v: k for k, v in self.user_to_index.items()}
         
         self.sparse_interaction_matrix = self.get_sparse_interaction_matrix(self.interaction_df)
     
-    def load(self, getter, weigher, label):
-        df = getter()
-        print(f'{label} df loaded: size={len(df)},',
-              f' uniq_users={len(df.user_id.unique())},',
-              f' uniq_chains={len(df.chain_id.unique())}')
-        df = weigher(df)
-        print(f'{label} df weighted: size={len(df)},',
-              f'uniq_users={len(df.user_id.unique())},',
-              f'uniq_chains={len(df.chain_id.unique())}')
-        return df
+#     def load(self, df, weigher, label):
+#         df = getter()
+#         print(f'{label} df loaded: size={len(df)},',
+#               f' uniq_users={len(df.user_id.unique())},',
+#               f' uniq_chains={len(df.chain_id.unique())}')
+#         df = weigher(df)
+#         print(f'{label} df weighted: size={len(df)},',
+#               f'uniq_users={len(df.user_id.unique())},',
+#               f'uniq_chains={len(df.chain_id.unique())}')
+#         return df
         
     def get_sparse_interaction_matrix(self, df):
         """
