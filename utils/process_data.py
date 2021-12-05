@@ -142,7 +142,8 @@ def preprocess_orders_and_clicks(
 def additional_filtration_orders_and_clicks(
     orders: pd.DataFrame,
     clicks: pd.DataFrame,
-    order_cnt: int = 3
+    order_cnt: int = 3,
+    regs_to_filter: list = [1] # только мск
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Дополнительная фильтрация, после генерации фичей
@@ -153,9 +154,9 @@ def additional_filtration_orders_and_clicks(
     orders - предобработанные заказы
     clicks - предобработанные клики
     order_cnt - минимальное количество заказов которое должно быть у ресторана
+    regs_to_filter -- оставить заказы только из этих регионов
     """
-    # только Мск
-    orders = orders[orders.city_id.isin([1])]
+    orders = orders[orders.city_id.isin(regs_to_filter)]
     # отсекаем рестораны без заказов
     orders = orders[orders.groupby("chain_id")['chain_id'].transform('size') >= order_cnt]
     # успешный заказ и перезаказ
