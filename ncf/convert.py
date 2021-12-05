@@ -34,6 +34,7 @@ from load import implicit_load
 from feature_spec import FeatureSpec
 from neumf_constants import USER_CHANNEL_NAME, ITEM_CHANNEL_NAME, LABEL_CHANNEL_NAME, TEST_SAMPLES_PER_SERIES
 import torch
+import pickle
 import os
 import tqdm
 
@@ -41,6 +42,11 @@ TEST_1 = 'test_data_1.pt'
 TEST_0 = 'test_data_0.pt'
 TRAIN_1 = 'train_data_1.pt'
 TRAIN_0 = 'train_data_0.pt'
+PRED_1 = 'pred_data_1.pt'
+PRED_0 = 'pred_data_0.pt'
+
+USER_MAPPING = 'user_mp.pkl'
+ITEM_MAPPING = 'chain_mp.pkl'
 
 USER_COLUMN = 'user_id'
 ITEM_COLUMN = 'chain_id'
@@ -49,14 +55,11 @@ WEIGHT_COLUMN = 'weight'
 
 def parse_args():
     parser = ArgumentParser()
-    parser.add_argument('--path', type=str, default='/data/ml-20m/ratings.csv',
-                        help='Path to reviews CSV file from MovieLens')
-    parser.add_argument('--output', type=str, default='/data',
-                        help='Output directory for train and test files')
-    parser.add_argument('--valid_negative', type=int, default=100,
-                        help='Number of negative samples for each positive test example')
-    parser.add_argument('--seed', '-s', type=int, default=1,
-                        help='Manually set random seed for torch')
+    parser.add_argument('--train_path', type=str, help='Path to CSV file of train interactions')
+    parser.add_argument('--pred_path', type=str, help='Path to CSV file of interactions to predict')
+    parser.add_argument('--output', type=str, help='Output directory for train/test files')
+    parser.add_argument('--valid_negative', type=int, default=100, help='Number of negative samples for each positive test example')
+    parser.add_argument('--seed', '-s', type=int, default=1, help='Manually set random seed for torch')
     return parser.parse_args()
 
 
@@ -156,25 +159,24 @@ def save_feature_spec(user_cardinality, item_cardinality, dtypes, test_negative_
     feature_spec.to_yaml(output_path=output_path)
 
 
-def main():
-    args = parse_args()
+def prepare_train_test(args):
 
-    if args.seed is not None:
-        torch.manual_seed(args.seed)
-
-    print("Loading raw data from {}".format(args.path))
-    df = implicit_load(args.path, sort=False)
+    print("Loading raw data from {}".format(args.train_path))
+    df = implicit_load(args.train_path, sort=False)
 
     print("Mapping original user and item IDs to new sequential IDs")
-    df[USER_COLUMN] = pd.factorize(df[USER_COLUMN])[0]
-    df[ITEM_COLUMN] = pd.factorize(df[ITEM_COLUMN])[0]
+    user_codes, user_uniques = pd.factorize(df[USER_COLUMN], sort=True)
+    df[USER_COLUMN] = user_codes
+    with open(USER_MAPPING, 'wb') as f:
+        pickle.dump(user_uniques, f)
 
-    user_cardinality = df[USER_COLUMN].max() + 1
-    item_cardinality = df[ITEM_COLUMN].max() + 1
+    item_codes, item_uniques = pd.factorize(df[ITEM_COLUMN], sort=True)
+    df[ITEM_COLUMN] = item_codes
+    with open(ITEM_MAPPING, 'wb') as f:
+        pickle.dump(item_uniques, f)
 
     # clean up data
     del df[WEIGHT_COLUMN], df["id"]
-
     df = df.drop_duplicates()  # assuming it keeps order
 
     # Test set is the last interaction for a given user
@@ -209,7 +211,22 @@ def main():
     torch.save(test_tensor, os.path.join(args.output, TEST_0))
     torch.save(test_labels, os.path.join(args.output, TEST_1))
 
-    save_feature_spec(user_cardinality=user_cardinality, item_cardinality=item_cardinality, dtypes=dtypes,
+    return user_uniques, item_uniques, dtypes
+
+
+def prepare_pred(args, user_uniques, item_uniques):
+    print("Loading pred data from {}".format(args.pred_path))
+    df = implicit_load(args.pred_path, sort=False)
+
+
+def main():
+    args = parse_args()
+
+    if args.seed is not None:
+        torch.manual_seed(args.seed)
+
+    user_uniques, item_uniques, dtypes = prepare_train_test(args)
+    save_feature_spec(user_cardinality=len(user_uniques), item_cardinality=len(item_uniques), dtypes=dtypes,
                       test_negative_samples=args.valid_negative, output_path=args.output + '/feature_spec.yaml')
 
 
