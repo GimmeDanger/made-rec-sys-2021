@@ -94,6 +94,8 @@ def parse_args():
     parser.add_argument('--checkpoint_dir', default='', type=str,
                         help='Path to the directory storing the checkpoint file, '
                              'passing an empty path disables checkpoint saving')
+    parser.add_argument('--checkpoint_name', default='model', type=str,
+                        help='Name of the checkpoint file')
     parser.add_argument('--load_checkpoint_path', default=None, type=str,
                         help='Path to the checkpoint file to be loaded before training/evaluation')
     parser.add_argument('--mode', choices=['train', 'test', 'pred'], default='train', type=str,
@@ -402,7 +404,7 @@ def main():
             best_epoch = epoch
             print("New best hr!")
             if args.checkpoint_dir:
-                save_checkpoint_path = os.path.join(args.checkpoint_dir, 'model.pth')
+                save_checkpoint_path = os.path.join(args.checkpoint_dir, f'{args.checkpoint_name}.pth')
                 print("Saving the model to: ", save_checkpoint_path)
                 torch.save(model.state_dict(), save_checkpoint_path)
             best_model_timestamp = time.time()
