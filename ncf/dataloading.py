@@ -85,13 +85,12 @@ class TestDataLoader:
         for channel_name, channel_features in self.channel_spec.items():
             channel_tensors = dict()
             for feature_name in channel_features:
-                channel_tensors[feature_name] = self.dataset.features[feature_name]
-
-                if not self.raw_dataset_length:
-                    self.raw_dataset_length = channel_tensors[feature_name].shape[0]
-                else:
-                    assert self.raw_dataset_length == channel_tensors[feature_name].shape[0]
-
+                if feature_name in self.dataset.features:
+                    channel_tensors[feature_name] = self.dataset.features[feature_name]
+                    if not self.raw_dataset_length:
+                        self.raw_dataset_length = channel_tensors[feature_name].shape[0]
+                    else:
+                        assert self.raw_dataset_length == channel_tensors[feature_name].shape[0]
             self.data[channel_name] = channel_tensors
 
     def _deduplication_augmentation(self):
@@ -192,13 +191,12 @@ class PredDataLoader:
         for channel_name, channel_features in self.channel_spec.items():
             channel_tensors = dict()
             for feature_name in channel_features:
-                channel_tensors[feature_name] = self.dataset.features[feature_name]
-
-                if not self.raw_dataset_length:
-                    self.raw_dataset_length = channel_tensors[feature_name].shape[0]
-                else:
-                    assert self.raw_dataset_length == channel_tensors[feature_name].shape[0]
-
+                if feature_name in self.dataset.features:
+                    channel_tensors[feature_name] = self.dataset.features[feature_name]
+                    if not self.raw_dataset_length:
+                        self.raw_dataset_length = channel_tensors[feature_name].shape[0]
+                    else:
+                        assert self.raw_dataset_length == channel_tensors[feature_name].shape[0]
             self.data[channel_name] = channel_tensors
 
     def _split_into_batches(self):
@@ -242,11 +240,12 @@ class TrainDataloader:
         for channel_name, channel_features in self.channel_spec.items():
             channel_tensors = dict()
             for feature_name in channel_features:
-                channel_tensors[feature_name] = self.dataset.features[feature_name]
-                if not self.raw_dataset_length:
-                    self.raw_dataset_length = channel_tensors[feature_name].shape[0]
-                else:
-                    assert self.raw_dataset_length == channel_tensors[feature_name].shape[0]
+                if feature_name in self.dataset.features:
+                    channel_tensors[feature_name] = self.dataset.features[feature_name]
+                    if not self.raw_dataset_length:
+                        self.raw_dataset_length = channel_tensors[feature_name].shape[0]
+                    else:
+                        assert self.raw_dataset_length == channel_tensors[feature_name].shape[0]
             self.data[channel_name] = channel_tensors
 
     def get_epoch_data(self):

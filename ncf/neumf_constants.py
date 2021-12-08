@@ -14,5 +14,7 @@
 
 USER_CHANNEL_NAME = 'user_ch'
 ITEM_CHANNEL_NAME = 'item_ch'
+TEST_ITEM_CHANNEL_NAME = 'test_item_ch'
 LABEL_CHANNEL_NAME = 'label_ch'
+H3_CHANNEL_NAME = 'h3_ch'
 TEST_SAMPLES_PER_SERIES = 'test_samples_per_series'

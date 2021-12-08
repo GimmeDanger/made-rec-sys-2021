@@ -32,7 +32,7 @@ from argparse import ArgumentParser
 import pandas as pd
 from load import implicit_load
 from feature_spec import FeatureSpec
-from neumf_constants import USER_CHANNEL_NAME, ITEM_CHANNEL_NAME, LABEL_CHANNEL_NAME, TEST_SAMPLES_PER_SERIES
+from neumf_constants import USER_CHANNEL_NAME, ITEM_CHANNEL_NAME, TEST_ITEM_CHANNEL_NAME, H3_CHANNEL_NAME, LABEL_CHANNEL_NAME, TEST_SAMPLES_PER_SERIES
 import torch
 import pickle
 import os
@@ -43,6 +43,7 @@ TEST_0 = 'test_data_0.pt'
 TRAIN_1 = 'train_data_1.pt'
 TRAIN_0 = 'train_data_0.pt'
 PRED_0 = 'pred_data_0.pt'
+PRED_1 = 'pred_data_1.pt'
 
 USER_MAPPING = 'user_to_index.pkl'
 ITEM_MAPPING = 'chain_to_index.pkl'
@@ -51,6 +52,10 @@ USER_COLUMN = 'user_id'
 ITEM_COLUMN = 'chain_id'
 WEIGHT_COLUMN = 'weight'
 LABEL_COLUMN = 'label'
+
+# extra columns for pred df
+H3_COLUMN = 'h3'
+TEST_ITEM_COLUMN = 'test_chain_id'
 
 
 def parse_args():
@@ -94,14 +99,16 @@ class _TestNegSampler:
         return items
 
 
-def save_feature_spec(args, user_cardinality, item_cardinality, dtypes,
-                      user_feature_name='user',
-                      item_feature_name='item',
-                      label_feature_name='label'):
+def save_feature_spec(args, user_cardinality, item_cardinality, dtypes):
 
-    pred_input = args.pred_path != ''
     test_negative_samples = args.valid_negative
     output_path = args.output + '/feature_spec.yaml'
+
+    h3_feature_name = 'h3'
+    user_feature_name = 'user'
+    item_feature_name = 'item'
+    label_feature_name = 'label'
+    test_item_feature_name = 'test_item'
 
     feature_spec = {
         user_feature_name: {
@@ -112,7 +119,13 @@ def save_feature_spec(args, user_cardinality, item_cardinality, dtypes,
             'dtype': dtypes[item_feature_name],
             'cardinality': int(item_cardinality)
         },
+        test_item_feature_name: {
+            'dtype': dtypes[label_feature_name],
+        },
         label_feature_name: {
+            'dtype': dtypes[label_feature_name],
+        },
+        h3_feature_name: {
             'dtype': dtypes[label_feature_name],
         }
     }
@@ -158,19 +171,28 @@ def save_feature_spec(args, user_cardinality, item_cardinality, dtypes,
             'type': 'torch_tensor',
             'features': [
                 user_feature_name,
-                item_feature_name,
-                label_feature_name
+                item_feature_name
             ],
             'files': [PRED_0],
+        },
+        {
+            'type': 'torch_tensor',
+            'features': [
+                test_item_feature_name,
+                h3_feature_name,
+            ],
+            'files': [PRED_1],
         }
     ]
     channel_spec = {
         USER_CHANNEL_NAME: [user_feature_name],
         ITEM_CHANNEL_NAME: [item_feature_name],
-        LABEL_CHANNEL_NAME: [label_feature_name]
+        TEST_ITEM_CHANNEL_NAME: [test_item_feature_name],
+        LABEL_CHANNEL_NAME: [label_feature_name],
+        H3_CHANNEL_NAME: [h3_feature_name]
     }
     source_spec = {'train': train_mapping, 'test': test_mapping}
-    if pred_input:
+    if args.pred_path is not None:
         source_spec['pred'] = pred_mapping
     feature_spec = FeatureSpec(feature_spec=feature_spec, metadata=metadata, source_spec=source_spec,
                                channel_spec=channel_spec, base_directory="")
@@ -185,14 +207,14 @@ def prepare_train_test(args):
     print("Mapping original user and item IDs to new sequential IDs")
     user_codes, user_uniques = pd.factorize(df[USER_COLUMN], sort=True)
     df[USER_COLUMN] = user_codes
-    user_uniques = { user_id : i for i, user_id in enumerate(user_uniques)}
-    with open(USER_MAPPING, 'wb') as f:
+    user_uniques = {user_id: i for i, user_id in enumerate(user_uniques)}
+    with open(f'{args.output}/{USER_MAPPING}', 'wb') as f:
         pickle.dump(user_uniques, f)
 
     item_codes, item_uniques = pd.factorize(df[ITEM_COLUMN], sort=True)
     df[ITEM_COLUMN] = item_codes
-    item_uniques = { item_id: i for i, item_id in enumerate(item_uniques)}
-    with open(ITEM_MAPPING, 'wb') as f:
+    item_uniques = {item_id: i for i, item_id in enumerate(item_uniques)}
+    with open(f'{args.output}/{ITEM_MAPPING}', 'wb') as f:
         pickle.dump(item_uniques, f)
 
     # clean up data
@@ -235,6 +257,9 @@ def prepare_train_test(args):
 
 
 def prepare_pred(args, user_to_index, item_to_index):
+
+    if args.pred_path is None:
+        return
     print("Loading pred data from {}".format(args.pred_path))
     pred = pd.read_parquet(args.pred_path)
     print("pred len, uniq users, uniq items:", len(pred), len(pred[USER_COLUMN].unique()), len(pred[ITEM_COLUMN].unique()))
@@ -242,12 +267,23 @@ def prepare_pred(args, user_to_index, item_to_index):
     print("filtering by user_to_index")
     print("pred len, uniq users, uniq items:", len(pred), len(pred[USER_COLUMN].unique()), len(pred[ITEM_COLUMN].unique()))
     pred = pred.query('chain_id in @item_to_index')
+    pred = pred.query('test_chain_id in @item_to_index')
     print("filtering by item_to_index")
     print("pred len, uniq users, uniq items:", len(pred), len(pred[USER_COLUMN].unique()), len(pred[ITEM_COLUMN].unique()))
+    print("chain_id min/max:", pred[ITEM_COLUMN].min(), pred[ITEM_COLUMN].max())
+    print("test_chain_id min/max:", pred[TEST_ITEM_COLUMN].min(), pred[TEST_ITEM_COLUMN].max())
     pred[USER_COLUMN] = pred[USER_COLUMN].map(user_to_index)
     pred[ITEM_COLUMN] = pred[ITEM_COLUMN].map(item_to_index)
-    pred_data = torch.from_numpy(pred[[USER_COLUMN, ITEM_COLUMN, LABEL_COLUMN]].values).cuda()
+    pred[TEST_ITEM_COLUMN] = pred[TEST_ITEM_COLUMN].map(item_to_index)
+    # TODO: perform h3 mapping here
+    print(pred.columns)
+    print(pred.head())
+    print("chain_id min/max:", pred[ITEM_COLUMN].min(), pred[ITEM_COLUMN].max())
+    print("test_chain_id min/max:", pred[TEST_ITEM_COLUMN].min(), pred[TEST_ITEM_COLUMN].max())
+    pred_data = torch.from_numpy(pred[[USER_COLUMN, ITEM_COLUMN]].values).cuda()
     torch.save(pred_data, os.path.join(args.output, PRED_0))
+    pred_data = torch.from_numpy(pred[[TEST_ITEM_COLUMN, H3_COLUMN]].values).cuda()
+    torch.save(pred_data, os.path.join(args.output, PRED_1))
 
 
 def main():

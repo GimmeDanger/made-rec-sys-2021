@@ -46,7 +46,7 @@ import utils
 import dataloading
 from neumf import NeuMF
 from feature_spec import FeatureSpec
-from neumf_constants import USER_CHANNEL_NAME, ITEM_CHANNEL_NAME, LABEL_CHANNEL_NAME
+from neumf_constants import USER_CHANNEL_NAME, ITEM_CHANNEL_NAME, TEST_ITEM_CHANNEL_NAME, H3_CHANNEL_NAME, LABEL_CHANNEL_NAME
 
 import dllogger
 
@@ -173,43 +173,53 @@ def pred_epoch(model, dataloader: dataloading.PredDataLoader, path, k):
     model.eval()
     user_feature_name = dataloader.channel_spec[USER_CHANNEL_NAME][0]
     item_feature_name = dataloader.channel_spec[ITEM_CHANNEL_NAME][0]
-    label_feature_name = dataloader.channel_spec[LABEL_CHANNEL_NAME][0]
+    test_item_feature_name = dataloader.channel_spec[TEST_ITEM_CHANNEL_NAME][0]
+    h3_feature_name = dataloader.channel_spec[H3_CHANNEL_NAME][0]
     with torch.no_grad():
         ratings_list = []
         users_list = []
         items_list = []
+        test_items_list = []
         h3_list = []
         for batch_dict in dataloader.get_epoch_data():
             user_batch = batch_dict[USER_CHANNEL_NAME][user_feature_name]
             item_batch = batch_dict[ITEM_CHANNEL_NAME][item_feature_name]
-            label_batch = batch_dict[LABEL_CHANNEL_NAME][label_feature_name]
-            ratings_list.append(model(user_batch, item_batch, sigmoid=True).detach())
-            users_list.append(user_batch)
-            items_list.append(item_batch)
-            h3_list.append(label_batch)
+            test_item_batch = batch_dict[TEST_ITEM_CHANNEL_NAME][test_item_feature_name]
+            h3_batch = batch_dict[H3_CHANNEL_NAME][h3_feature_name]
+            # predict and dump to gpu (not enough memory after several epoches otherwise)
+            ratings_list.append(model(user_batch, item_batch, sigmoid=True).detach().cpu())
+            users_list.append(user_batch.cpu())
+            items_list.append(item_batch.cpu())
+            test_items_list.append(test_item_batch.cpu())
+            h3_list.append(h3_batch.cpu())
 
         merged = torch.stack([
             torch.cat(users_list).view(-1),
             torch.cat(h3_list).view(-1),
             torch.cat(items_list).view(-1),
+            torch.cat(test_items_list).view(-1),
             torch.cat(ratings_list).view(-1)],
             dim=1)
-        del ratings_list, users_list, items_list, h3_list
+        del ratings_list, users_list, items_list, test_items_list, h3_list
 
         start = time.time()
-        score_idx = 3
+        score_idx = 4
         print("Converting output tensor to pandas dataframe...")
-        merged = merged[merged[:, score_idx].sort(descending=True)[1]].cpu()
-        df = pd.DataFrame(merged.numpy(), columns=['user_id', 'h3_id', 'pred_chain_id', 'score'])
+        merged = merged[merged[:, score_idx].sort(descending=True)[1]]
+        df = pd.DataFrame(merged.numpy(), columns=['user_id', 'h3_id', 'pred_chain_id', 'test_chain_id', 'score'])
         df['user_id'] = df['user_id'].astype(int)
         df['h3_id'] = df['h3_id'].astype(int)
         df['pred_chain_id'] = df['pred_chain_id'].astype(int)
-        df = df.groupby(['user_id', 'h3_id'], sort=False, as_index=False).head(k)
-        df = df[['user_id', 'h3_id', 'pred_chain_id']]
-        df.to_parquet(f'{path}/processed_val_df_part_1.parquet')
+        df['test_chain_id'] = df['test_chain_id'].astype(int)
+        df = df.groupby(['user_id', 'h3_id', 'test_chain_id'], sort=False, as_index=False).head(k)
+        df = df[['user_id', 'h3_id', 'pred_chain_id', 'test_chain_id']]
+        df.to_parquet(f'{path}/processed_val_df.parquet')
         convert_time = time.time() - start
         print("Convering time:", convert_time)
-        print("output df len, uniq users, uniq items:", len(df), len(df['user_id'].unique()), len(df['pred_chain_id'].unique()))
+        print("output df len, uniq users, uniq items, uniq test_items:",
+            len(df), len(df['user_id'].unique()),
+            len(df['pred_chain_id'].unique()),
+            len(df['test_chain_id'].unique()))
         print(df.head())
 
     model.train()
@@ -258,8 +268,9 @@ def main():
     testset = dataloading.TorchTensorDataset(feature_spec, mapping_name='test', args=args)
     test_loader = dataloading.TestDataLoader(testset, args)
     
-    predset = dataloading.TorchTensorDataset(feature_spec, mapping_name='pred', args=args)
-    pred_loader = dataloading.PredDataLoader(predset, args)
+    if args.mode == 'pred':
+        predset = dataloading.TorchTensorDataset(feature_spec, mapping_name='pred', args=args)
+        pred_loader = dataloading.PredDataLoader(predset, args)
 
     # make pytorch memory behavior more consistent later
     torch.cuda.empty_cache()
