@@ -30,10 +30,12 @@
 
 import torch.jit
 from apex.optimizers import FusedAdam
+from collections import defaultdict
 import os
 import math
 import time
 import numpy as np
+from tqdm import tqdm
 from argparse import ArgumentParser
 
 import torch
@@ -93,7 +95,7 @@ def parse_args():
                              'passing an empty path disables checkpoint saving')
     parser.add_argument('--load_checkpoint_path', default=None, type=str,
                         help='Path to the checkpoint file to be loaded before training/evaluation')
-    parser.add_argument('--mode', choices=['train', 'test'], default='train', type=str,
+    parser.add_argument('--mode', choices=['train', 'test', 'pred'], default='train', type=str,
                         help='Passing "test" will only run a single evaluation; '
                              'otherwise, full training will be performed')
     parser.add_argument('--grads_accumulated', default=1, type=int,
@@ -136,7 +138,6 @@ def val_epoch(model, dataloader: dataloading.TestDataLoader, k, distributed=Fals
             user_batch = batch_dict[USER_CHANNEL_NAME][user_feature_name]
             item_batch = batch_dict[ITEM_CHANNEL_NAME][item_feature_name]
             label_batch = batch_dict[LABEL_CHANNEL_NAME][label_feature_name]
-
             p.append(model(user_batch, item_batch, sigmoid=True).detach())
             labels_list.append(label_batch)
 
@@ -165,6 +166,59 @@ def val_epoch(model, dataloader: dataloading.TestDataLoader, k, distributed=Fals
 
     model.train()
     return hr, ndcg
+
+
+def pred_epoch(model, dataloader: dataloading.PredDataLoader, k):
+    model.eval()
+    user_feature_name = dataloader.channel_spec[USER_CHANNEL_NAME][0]
+    item_feature_name = dataloader.channel_spec[ITEM_CHANNEL_NAME][0]
+    label_feature_name = dataloader.channel_spec[LABEL_CHANNEL_NAME][0]
+    with torch.no_grad():
+        ratings_list = []
+        users_list = []
+        items_list = []
+        h3_list = []
+        for batch_dict in dataloader.get_epoch_data():
+            user_batch = batch_dict[USER_CHANNEL_NAME][user_feature_name]
+            item_batch = batch_dict[ITEM_CHANNEL_NAME][item_feature_name]
+            label_batch = batch_dict[LABEL_CHANNEL_NAME][label_feature_name]
+            ratings_list.append(model(user_batch, item_batch, sigmoid=True).detach())
+            users_list.append(user_batch)
+            items_list.append(item_batch)
+            h3_list.append(label_batch)
+
+        merged = torch.stack([
+            torch.cat(users_list).view(-1),
+            torch.cat(h3_list).view(-1),
+            torch.cat(items_list).view(-1),
+            torch.cat(ratings_list).view(-1)],
+            dim=1)
+        del ratings_list, users_list, items_list, h3_list
+        # merged = merged[merged[:, u_idx].sort()[1]]
+        print(merged.shape)
+        print(merged)
+        
+        # u_idx = 0
+        # h_idx = 1
+        # i_idx = 2
+        # local_item_id = 0
+        # local_score_id = 1
+        # user_uniqs = merged[:, u_idx].unique()
+        # h_uniqs = merged[:, h_idx].unique()
+
+        # mp = defaultdict(defaultdict)
+        # for user in tqdm(user_uniqs):
+        #     u_slice = merged[merged[:, u_idx] == user]
+        #     for h in h_uniqs:
+        #         uh_slice = u_slice[u_slice[:, h_idx] == h]
+        #         scores_slice = uh_slice[:, i_idx:]
+        #         local_k = min(k, len(scores_slice))
+        #         top = scores_slice[scores_slice[:, local_score_id].topk(k=local_k)[1]]
+        #         mp[user][h] = top[:, local_item_id]
+        # print(len(mp))
+
+    model.train()
+    return 0, 0
 
 
 def main():
@@ -202,10 +256,15 @@ def main():
 
     feature_spec_path = os.path.join(args.data, args.feature_spec_file)
     feature_spec = FeatureSpec.from_yaml(feature_spec_path)
+    
     trainset = dataloading.TorchTensorDataset(feature_spec, mapping_name='train', args=args)
-    testset = dataloading.TorchTensorDataset(feature_spec, mapping_name='test', args=args)
     train_loader = dataloading.TrainDataloader(trainset, args)
+
+    testset = dataloading.TorchTensorDataset(feature_spec, mapping_name='test', args=args)
     test_loader = dataloading.TestDataLoader(testset, args)
+    
+    predset = dataloading.TorchTensorDataset(feature_spec, mapping_name='pred', args=args)
+    pred_loader = dataloading.PredDataLoader(predset, args)
 
     # make pytorch memory behavior more consistent later
     torch.cuda.empty_cache()
@@ -250,6 +309,17 @@ def main():
     if args.mode == 'test':
         start = time.time()
         hr, ndcg = val_epoch(model, test_loader, args.topk, distributed=args.distributed)
+        val_time = time.time() - start
+        eval_size = test_loader.raw_dataset_length
+        eval_throughput = eval_size / val_time
+
+        dllogger.log(step=tuple(), data={'best_eval_throughput': eval_throughput,
+                                         'hr@10': hr})
+        return
+    elif args.mode == 'pred':
+        start = time.time()
+        assert args.distributed == False
+        hr, ndcg = pred_epoch(model, pred_loader, args.topk)
         val_time = time.time() - start
         eval_size = test_loader.raw_dataset_length
         eval_throughput = eval_size / val_time

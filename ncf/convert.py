@@ -42,15 +42,15 @@ TEST_1 = 'test_data_1.pt'
 TEST_0 = 'test_data_0.pt'
 TRAIN_1 = 'train_data_1.pt'
 TRAIN_0 = 'train_data_0.pt'
-PRED_1 = 'pred_data_1.pt'
 PRED_0 = 'pred_data_0.pt'
 
-USER_MAPPING = 'user_mp.pkl'
-ITEM_MAPPING = 'chain_mp.pkl'
+USER_MAPPING = 'user_to_index.pkl'
+ITEM_MAPPING = 'chain_to_index.pkl'
 
 USER_COLUMN = 'user_id'
 ITEM_COLUMN = 'chain_id'
 WEIGHT_COLUMN = 'weight'
+LABEL_COLUMN = 'label'
 
 
 def parse_args():
@@ -94,10 +94,15 @@ class _TestNegSampler:
         return items
 
 
-def save_feature_spec(user_cardinality, item_cardinality, dtypes, test_negative_samples, output_path,
+def save_feature_spec(args, user_cardinality, item_cardinality, dtypes,
                       user_feature_name='user',
                       item_feature_name='item',
                       label_feature_name='label'):
+
+    pred_input = args.pred_path != ''
+    test_negative_samples = args.valid_negative
+    output_path = args.output + '/feature_spec.yaml'
+
     feature_spec = {
         user_feature_name: {
             'dtype': dtypes[user_feature_name],
@@ -148,12 +153,25 @@ def save_feature_spec(user_cardinality, item_cardinality, dtypes, test_negative_
             'files': [TEST_1],
         }
     ]
+    pred_mapping = [
+        {
+            'type': 'torch_tensor',
+            'features': [
+                user_feature_name,
+                item_feature_name,
+                label_feature_name
+            ],
+            'files': [PRED_0],
+        }
+    ]
     channel_spec = {
         USER_CHANNEL_NAME: [user_feature_name],
         ITEM_CHANNEL_NAME: [item_feature_name],
         LABEL_CHANNEL_NAME: [label_feature_name]
     }
     source_spec = {'train': train_mapping, 'test': test_mapping}
+    if pred_input:
+        source_spec['pred'] = pred_mapping
     feature_spec = FeatureSpec(feature_spec=feature_spec, metadata=metadata, source_spec=source_spec,
                                channel_spec=channel_spec, base_directory="")
     feature_spec.to_yaml(output_path=output_path)
@@ -162,21 +180,23 @@ def save_feature_spec(user_cardinality, item_cardinality, dtypes, test_negative_
 def prepare_train_test(args):
 
     print("Loading raw data from {}".format(args.train_path))
-    df = implicit_load(args.train_path, sort=False)
+    df = pd.read_parquet(args.train_path)
 
     print("Mapping original user and item IDs to new sequential IDs")
     user_codes, user_uniques = pd.factorize(df[USER_COLUMN], sort=True)
     df[USER_COLUMN] = user_codes
+    user_uniques = { user_id : i for i, user_id in enumerate(user_uniques)}
     with open(USER_MAPPING, 'wb') as f:
         pickle.dump(user_uniques, f)
 
     item_codes, item_uniques = pd.factorize(df[ITEM_COLUMN], sort=True)
     df[ITEM_COLUMN] = item_codes
+    item_uniques = { item_id: i for i, item_id in enumerate(item_uniques)}
     with open(ITEM_MAPPING, 'wb') as f:
         pickle.dump(item_uniques, f)
 
     # clean up data
-    del df[WEIGHT_COLUMN], df["id"]
+    del df[WEIGHT_COLUMN]
     df = df.drop_duplicates()  # assuming it keeps order
 
     # Test set is the last interaction for a given user
@@ -214,9 +234,20 @@ def prepare_train_test(args):
     return user_uniques, item_uniques, dtypes
 
 
-def prepare_pred(args, user_uniques, item_uniques):
+def prepare_pred(args, user_to_index, item_to_index):
     print("Loading pred data from {}".format(args.pred_path))
-    df = implicit_load(args.pred_path, sort=False)
+    pred = pd.read_parquet(args.pred_path)
+    print("pred len, uniq users, uniq items:", len(pred), len(pred[USER_COLUMN].unique()), len(pred[ITEM_COLUMN].unique()))
+    pred = pred.query('user_id in @user_to_index')
+    print("filtering by user_to_index")
+    print("pred len, uniq users, uniq items:", len(pred), len(pred[USER_COLUMN].unique()), len(pred[ITEM_COLUMN].unique()))
+    pred = pred.query('chain_id in @item_to_index')
+    print("filtering by item_to_index")
+    print("pred len, uniq users, uniq items:", len(pred), len(pred[USER_COLUMN].unique()), len(pred[ITEM_COLUMN].unique()))
+    pred[USER_COLUMN] = pred[USER_COLUMN].map(user_to_index)
+    pred[ITEM_COLUMN] = pred[ITEM_COLUMN].map(item_to_index)
+    pred_data = torch.from_numpy(pred[[USER_COLUMN, ITEM_COLUMN, LABEL_COLUMN]].values).cuda()
+    torch.save(pred_data, os.path.join(args.output, PRED_0))
 
 
 def main():
@@ -225,9 +256,9 @@ def main():
     if args.seed is not None:
         torch.manual_seed(args.seed)
 
-    user_uniques, item_uniques, dtypes = prepare_train_test(args)
-    save_feature_spec(user_cardinality=len(user_uniques), item_cardinality=len(item_uniques), dtypes=dtypes,
-                      test_negative_samples=args.valid_negative, output_path=args.output + '/feature_spec.yaml')
+    user_to_index, item_to_index, dtypes = prepare_train_test(args)
+    prepare_pred(args, user_to_index, item_to_index)
+    save_feature_spec(args, user_cardinality=len(user_to_index), item_cardinality=len(item_to_index), dtypes=dtypes)
 
 
 if __name__ == '__main__':

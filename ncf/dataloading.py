@@ -173,6 +173,50 @@ class TestDataLoader:
         return self.data[self.ignore_mask_channel_name][self.ignore_mask_feature_name]
 
 
+class PredDataLoader:
+    def __init__(self, dataset: TorchTensorDataset, args):
+        self.dataset = dataset
+        self.feature_spec = dataset.feature_spec
+        self.channel_spec = self.feature_spec.channel_spec
+        self.samples_in_series = self.feature_spec.metadata[TEST_SAMPLES_PER_SERIES]
+        self.raw_dataset_length = None  # First feature loaded sets this. Total length before splitting across cards
+        self.data = dict()
+        self.world_size = args.world_size
+        self.local_rank = args.local_rank
+        self.batch_size = args.valid_batch_size
+
+        self._build_channel_dict()
+        self._split_into_batches()
+
+    def _build_channel_dict(self):
+        for channel_name, channel_features in self.channel_spec.items():
+            channel_tensors = dict()
+            for feature_name in channel_features:
+                channel_tensors[feature_name] = self.dataset.features[feature_name]
+
+                if not self.raw_dataset_length:
+                    self.raw_dataset_length = channel_tensors[feature_name].shape[0]
+                else:
+                    assert self.raw_dataset_length == channel_tensors[feature_name].shape[0]
+
+            self.data[channel_name] = channel_tensors
+
+    def _split_into_batches(self):
+        self.batches = None
+        # This is the structure of each batch, waiting to be copied and filled in with data
+        for channel_name, channel_dict in self.data.items():
+            for feature_name, feature_tensor in channel_dict.items():
+                feature_batches = feature_tensor.view(-1).split(self.batch_size)
+                if not self.batches:
+                    self.batches = list(
+                        {channel_name: dict() for channel_name in self.data.keys()} for _ in feature_batches)
+                for pos, feature_batch_data in enumerate(feature_batches):
+                    self.batches[pos][channel_name][feature_name] = feature_batch_data
+
+    def get_epoch_data(self):
+        return self.batches
+
+
 class TrainDataloader:
     def __init__(self, dataset: TorchTensorDataset, args):
         self.dataset = dataset
