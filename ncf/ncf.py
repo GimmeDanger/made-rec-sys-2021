@@ -35,6 +35,7 @@ import os
 import math
 import time
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 from argparse import ArgumentParser
 
@@ -168,7 +169,7 @@ def val_epoch(model, dataloader: dataloading.TestDataLoader, k, distributed=Fals
     return hr, ndcg
 
 
-def pred_epoch(model, dataloader: dataloading.PredDataLoader, k):
+def pred_epoch(model, dataloader: dataloading.PredDataLoader, path, k):
     model.eval()
     user_feature_name = dataloader.channel_spec[USER_CHANNEL_NAME][0]
     item_feature_name = dataloader.channel_spec[ITEM_CHANNEL_NAME][0]
@@ -194,28 +195,22 @@ def pred_epoch(model, dataloader: dataloading.PredDataLoader, k):
             torch.cat(ratings_list).view(-1)],
             dim=1)
         del ratings_list, users_list, items_list, h3_list
-        # merged = merged[merged[:, u_idx].sort()[1]]
-        print(merged.shape)
-        print(merged)
-        
-        # u_idx = 0
-        # h_idx = 1
-        # i_idx = 2
-        # local_item_id = 0
-        # local_score_id = 1
-        # user_uniqs = merged[:, u_idx].unique()
-        # h_uniqs = merged[:, h_idx].unique()
 
-        # mp = defaultdict(defaultdict)
-        # for user in tqdm(user_uniqs):
-        #     u_slice = merged[merged[:, u_idx] == user]
-        #     for h in h_uniqs:
-        #         uh_slice = u_slice[u_slice[:, h_idx] == h]
-        #         scores_slice = uh_slice[:, i_idx:]
-        #         local_k = min(k, len(scores_slice))
-        #         top = scores_slice[scores_slice[:, local_score_id].topk(k=local_k)[1]]
-        #         mp[user][h] = top[:, local_item_id]
-        # print(len(mp))
+        start = time.time()
+        score_idx = 3
+        print("Converting output tensor to pandas dataframe...")
+        merged = merged[merged[:, score_idx].sort(descending=True)[1]].cpu()
+        df = pd.DataFrame(merged.numpy(), columns=['user_id', 'h3_id', 'pred_chain_id', 'score'])
+        df['user_id'] = df['user_id'].astype(int)
+        df['h3_id'] = df['h3_id'].astype(int)
+        df['pred_chain_id'] = df['pred_chain_id'].astype(int)
+        df = df.groupby(['user_id', 'h3_id'], sort=False, as_index=False).head(k)
+        df = df[['user_id', 'h3_id', 'pred_chain_id']]
+        df.to_parquet(f'{path}/processed_val_df_part_1.parquet')
+        convert_time = time.time() - start
+        print("Convering time:", convert_time)
+        print("output df len, uniq users, uniq items:", len(df), len(df['user_id'].unique()), len(df['pred_chain_id'].unique()))
+        print(df.head())
 
     model.train()
     return 0, 0
@@ -319,7 +314,7 @@ def main():
     elif args.mode == 'pred':
         start = time.time()
         assert args.distributed == False
-        hr, ndcg = pred_epoch(model, pred_loader, args.topk)
+        hr, ndcg = pred_epoch(model, pred_loader, args.data, args.topk)
         val_time = time.time() - start
         eval_size = test_loader.raw_dataset_length
         eval_throughput = eval_size / val_time
