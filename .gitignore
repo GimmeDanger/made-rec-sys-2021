@@ -131,6 +131,12 @@ dmypy.json
 # Data
 data/
 .DS_Store
+.vscode
 
 # User experiments
 experiments/
+
+# bot
+bot/token.txt
+bot/data/
+bot/env/
