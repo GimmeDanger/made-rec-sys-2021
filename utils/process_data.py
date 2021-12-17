@@ -166,3 +166,26 @@ def additional_filtration_orders_and_clicks(
     clicks = clicks[clicks.chain_id.isin(orders.chain_id.unique())]
     
     return orders, clicks
+
+
+def make_h3_to_city_dict(chains, h3index, filter_chains = True):
+
+    if filter_chains:
+        chains = chains[
+            (chains["chain_id"].notna())
+            & (chains["city_id"] != 0)
+        ]
+        chains, _ = reduce_mem_usage(chains, verbose=False)
+
+    chain_id_to_city_id = (
+        chains.groupby("chain_id", sort=False)["city_id"]
+        .agg(lambda x:x.value_counts().index[0])
+        .to_dict()
+    )
+
+    h3_to_city_id = {
+        k: Counter([chain_id_to_city_id.get(i, 0) for i in v]).most_common(1)[0][0]
+        for k, v in h3index.h3_to_chains.items()
+    }
+    
+    return h3_to_city_id
