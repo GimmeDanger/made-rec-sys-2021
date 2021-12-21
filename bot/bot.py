@@ -34,7 +34,7 @@ sample_df.user_id = sample_df.user_id.map(sample_user_ids)
 sample_user_ids = sample_df.user_id.unique()
 sample_state = defaultdict(lambda: defaultdict(str))
 
-# predict state
+# recommend state
 h3_to_chains = pd.read_pickle(H3_TO_CHAINS_PATH)
 h3_to_city_id = pd.read_pickle(H3_TO_CITY_ID_PATH)
 city_id_to_name = {city_id: name for name, city_id in pd.read_pickle(CITY_ID_TO_NAME_PATH).items()}
@@ -54,6 +54,8 @@ kb_sample_pred.row(btn_sample_als, btn_sample_top_rec, btn_sample_lightfm)
 kb_loc_request = ReplyKeyboardMarkup(resize_keyboard=True).add(
     KeyboardButton('Отправить свою локацию 🗺️', request_location=True)
 )
+def generate_kb_top_rest():
+
 
 
 @dp.message_handler(commands=['start'])
@@ -159,6 +161,7 @@ async def process_location(message: types.Message):
         logger.info(f'h3 cached for demo user {demo_user_id}')
         demo_user_state[demo_user_id] = defaultdict()
         demo_user_state[demo_user_id]['h3'] = h3
+        demo_user_state[demo_user_id]['h3_top_chains'] = [1, 2, 3]
         msg += f'h3: {h3}\ncity: {city_id_to_name[h3_to_city_id[h3]]}'
     else:
         msg += 'h3: unknown,\nпопробуйте еще раз'
