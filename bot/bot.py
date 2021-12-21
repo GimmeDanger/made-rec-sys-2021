@@ -3,6 +3,7 @@ import logging
 import pandas as pd
 import numpy as np
 from h3 import geo_to_h3
+from model import Model
 from collections import defaultdict
 
 from aiogram import Bot, types
@@ -15,29 +16,29 @@ from aiogram.types import ReplyKeyboardRemove, \
     InlineKeyboardMarkup, InlineKeyboardButton
 
 
-from config import TOKEN, DATA_PATH, H3_RESOLUTION, \
-    H3_TO_CHAINS_PATH, H3_TO_CITY_ID_PATH, CITY_ID_TO_NAME_PATH
+from config import TOKEN, H3_RESOLUTION
 
 
 logger = logging.getLogger(__name__)
 log_fmt = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 logging.basicConfig(level=logging.INFO, format=log_fmt)
 
-
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
+model = Model()
 
 # sample state
-sample_df = pd.read_parquet(DATA_PATH)
+sample_df = pd.read_parquet('data/results_30.parquet')
 sample_user_ids = {u: i for i, u in enumerate(sample_df.user_id.unique())}
 sample_df.user_id = sample_df.user_id.map(sample_user_ids)
 sample_user_ids = sample_df.user_id.unique()
 sample_state = defaultdict(lambda: defaultdict(str))
 
 # recommend state
-h3_to_chains = pd.read_pickle(H3_TO_CHAINS_PATH)
-h3_to_city_id = pd.read_pickle(H3_TO_CITY_ID_PATH)
-city_id_to_name = {city_id: name for name, city_id in pd.read_pickle(CITY_ID_TO_NAME_PATH).items()}
+h3_to_chains = pd.read_pickle('data/h3_to_chains.pkl')
+h3_to_city_id = pd.read_pickle('data/h3_to_city_id.pkl')
+chain_id_to_name = pd.read_pickle('data/chain_id_to_name.pkl')
+city_id_to_name = {city_id: name for name, city_id in pd.read_pickle('data/city_id_to_name.pkl').items()}
 demo_user_state = defaultdict(lambda: defaultdict(str))
 
 # /sample keyboards
@@ -55,8 +56,7 @@ kb_loc_request = ReplyKeyboardMarkup(resize_keyboard=True).add(
     KeyboardButton('Отправить свою локацию 🗺️', request_location=True)
 )
 def generate_kb_top_rest():
-
-
+    pass
 
 @dp.message_handler(commands=['start'])
 async def process_start_command(message: types.Message):
@@ -161,7 +161,9 @@ async def process_location(message: types.Message):
         logger.info(f'h3 cached for demo user {demo_user_id}')
         demo_user_state[demo_user_id] = defaultdict()
         demo_user_state[demo_user_id]['h3'] = h3
-        demo_user_state[demo_user_id]['h3_top_chains'] = [1, 2, 3]
+        demo_user_state[demo_user_id]['h3_top_chains'] = [chain_id_to_name[id] for id in model.top_rec(h3)]
+        logger.info(f'h3 cached for demo user {demo_user_id}')
+        logger.info(demo_user_state[demo_user_id])
         msg += f'h3: {h3}\ncity: {city_id_to_name[h3_to_city_id[h3]]}'
     else:
         msg += 'h3: unknown,\nпопробуйте еще раз'
