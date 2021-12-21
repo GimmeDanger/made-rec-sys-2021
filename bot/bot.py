@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from h3 import geo_to_h3
 from model import Model
+from random import sample
 from collections import defaultdict
 
 from aiogram import Bot, types
@@ -16,7 +17,7 @@ from aiogram.types import ReplyKeyboardRemove, \
     InlineKeyboardMarkup, InlineKeyboardButton
 
 
-from config import TOKEN, H3_RESOLUTION
+from config import TOKEN, H3_RESOLUTION, USER_CHOICE_SIZE
 
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ sample_state = defaultdict(lambda: defaultdict(str))
 h3_to_chains = pd.read_pickle('data/h3_to_chains.pkl')
 h3_to_city_id = pd.read_pickle('data/h3_to_city_id.pkl')
 chain_id_to_name = pd.read_pickle('data/chain_id_to_name.pkl')
-city_id_to_name = {city_id: name for name, city_id in pd.read_pickle('data/city_id_to_name.pkl').items()}
+city_id_to_name = {city_id: name for name, city_id in pd.read_pickle('data/city_name_to_id.pkl').items()}
 demo_user_state = defaultdict(lambda: defaultdict(str))
 
 # /sample keyboards
@@ -55,8 +56,22 @@ kb_sample_pred.row(btn_sample_als, btn_sample_top_rec, btn_sample_lightfm)
 kb_loc_request = ReplyKeyboardMarkup(resize_keyboard=True).add(
     KeyboardButton('Отправить свою локацию 🗺️', request_location=True)
 )
-def generate_kb_top_rest():
-    pass
+
+
+def generate_kb_top_rest(chains, max_btn_in_row=2, max_btn_in_kb=6):
+    kb = InlineKeyboardMarkup(row_width=max_btn_in_row, resize_keyboard=True)
+    btns = []
+    for chain_id in sample(chains, min(len(chains), max_btn_in_kb)):
+        chain_name = chain_id_to_name[chain_id]
+        btns.append(InlineKeyboardButton(chain_name, callback_data=f'btn_kb_top_rest_{chain_id}'))
+        if len(btns) % max_btn_in_row == 0:
+            kb.row(*btns, )
+            btns = []
+    if len(btns) != 0:
+        kb.row(*btns, )
+    kb.add(InlineKeyboardButton('Обновить 🔄', callback_data='btn_kb_top_rest_refresh'))
+    return kb
+
 
 @dp.message_handler(commands=['start'])
 async def process_start_command(message: types.Message):
@@ -154,21 +169,83 @@ async def process_location(message: types.Message):
     h3 = geo_to_h3(lat=lat,
                    lng=lng,
                    resolution=H3_RESOLUTION)
-
-    demo_user_id = message['from'].id
-    msg = f'lat: {lat},\nlng: {lng}\n'
-    if h3 in h3_to_chains:
-        logger.info(f'h3 cached for demo user {demo_user_id}')
+    demo_user_id = message['chat'].id
+    
+    msg = f'lat: {lat}'
+    msg += f'\nlng: {lng}'
+    if h3 in h3_to_chains:   
+        top_rec = model.top_rec(h3)
+        top_uniq_names = set()
+        h3_top_chains = []
+        # drop chain ids with same names
+        # for pretty output
+        for id in top_rec:
+            chain_name = chain_id_to_name[id]
+            if chain_name not in top_uniq_names:
+                h3_top_chains.append(id)
+                top_uniq_names.add(chain_name)
+        
         demo_user_state[demo_user_id] = defaultdict()
         demo_user_state[demo_user_id]['h3'] = h3
-        demo_user_state[demo_user_id]['h3_top_chains'] = [chain_id_to_name[id] for id in model.top_rec(h3)]
+        demo_user_state[demo_user_id]['h3_top_chains'] = set(h3_top_chains)
+        demo_user_state[demo_user_id]['h3_hist_chains'] = set()
+        
         logger.info(f'h3 cached for demo user {demo_user_id}')
         logger.info(demo_user_state[demo_user_id])
-        msg += f'h3: {h3}\ncity: {city_id_to_name[h3_to_city_id[h3]]}'
+
+        msg += f'\nh3: {h3}'
+        msg += f'\ncity: {city_id_to_name[h3_to_city_id[h3]]}'
+        msg += '\n\nВыберите 5 ресторанов из списка:'
+        ids = list(demo_user_state[demo_user_id]['h3_top_chains'])
+        markup = generate_kb_top_rest(ids)
     else:
-        msg += 'h3: unknown,\nпопробуйте еще раз'
+        msg += '\nh3: неизвестный'
+        msg += '\n\nПопробуйте еще раз!'
+        markup = None
+
     logger.info(f'reply msg: {msg}')
-    await bot.send_message(demo_user_id, msg)
+    await bot.send_message(demo_user_id, msg, reply_markup=markup)
+
+
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith('btn_kb_top_rest'))
+async def process_callback_top_rest(callback_query: types.CallbackQuery):
+
+    data = callback_query.data
+    demo_user_id = callback_query.message.chat.id
+    user_h3_top_chains = demo_user_state[demo_user_id]['h3_top_chains']
+    user_h3_hist_chains = demo_user_state[demo_user_id]['h3_hist_chains']
+
+    logger.info('/recommend top rest keyboard callback:')
+    logger.info(callback_query)
+    logger.info(f'demo user id {demo_user_id} state:')
+    logger.info([(id, chain_id_to_name[id]) for id in user_h3_top_chains])
+    logger.info([(id, chain_id_to_name[id]) for id in user_h3_hist_chains])
+
+    if data.startswith('btn_kb_top_rest_refresh'):
+        logger.info('btn refresh')
+        ids = list(user_h3_top_chains - user_h3_hist_chains)
+        markup = generate_kb_top_rest(ids)
+        await bot.edit_message_text(
+            chat_id=callback_query.message.chat.id,
+            message_id=callback_query.message.message_id,
+            reply_markup=markup,
+            text=callback_query.message.text)
+    else:
+        chain_id = int(data[len('btn_kb_top_rest_'):])
+        user_h3_hist_chains.add(chain_id)
+        demo_user_state[demo_user_id]['h3_hist_chains'] = user_h3_hist_chains
+        logger.info(f'btn {chain_id}: {chain_id_to_name[chain_id]}')
+        if USER_CHOICE_SIZE >= len(user_h3_hist_chains):
+            await bot.send_message(demo_user_id, 'Рекомендация: xxx')
+        else:
+            logger.info('continue adding hist chains from kb')
+            ids = list(user_h3_top_chains - user_h3_hist_chains)
+            markup = generate_kb_top_rest(ids)
+            await bot.edit_message_text(
+                chat_id=callback_query.message.chat.id,
+                message_id=callback_query.message.message_id,
+                reply_markup=markup,
+                text=callback_query.message.text)
 
 if __name__ == '__main__':
     executor.start_polling(dp)
