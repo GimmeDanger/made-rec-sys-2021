@@ -31,7 +31,7 @@ user_ids = df.user_id.unique()
 state = defaultdict(lambda: defaultdict(str))
 
 
-# keyboards
+# /sample keyboards
 btn_sample_new_user = InlineKeyboardButton('new user', callback_data='btn_sample_pred_new_user')
 btn_sample_new_h3 = InlineKeyboardButton('new h3', callback_data='btn_sample_pred_new_h3')
 btn_sample_top_k = InlineKeyboardButton('top_k', callback_data='btn_sample_pred_top_k')
@@ -40,6 +40,8 @@ btn_sample_top_rec = InlineKeyboardButton('top_rec', callback_data='btn_sample_p
 btn_sample_lightfm = InlineKeyboardButton('lightfm', callback_data='btn_sample_pred_lightfm')
 kb_sample_pred = InlineKeyboardMarkup(row_width=3, resize_keyboard=True).row(btn_sample_new_user, btn_sample_new_h3, btn_sample_top_k)
 kb_sample_pred.row(btn_sample_als, btn_sample_top_rec, btn_sample_lightfm)
+
+# /predict keyboards
 
 
 @dp.message_handler(commands=['start'])
@@ -62,6 +64,10 @@ async def process_command_sample(message: types.Message):
     state[state_id]['h3'] = h3
     state[state_id]['model'] = 'als'
     state[state_id]['top_k'] = 5
+    logger.info('/sample started from:')
+    logger.info(message)
+    logger.info(f'new state of msg {state_id}:')
+    logger.info(state[state_id])
     await message.reply(msg, reply_markup=kb_sample_pred)
 
 
@@ -101,8 +107,14 @@ async def process_callback_sample(callback_query: types.CallbackQuery):
     state[state_id]['h3'] = str(h3)
     state[state_id]['top_k'] = str(top_k)
     state[state_id]['model'] = str(model)
-    
     msg += '\n'
+
+    logger.info('/sample keyboard callback:')
+    logger.info(callback_query)
+    logger.info(f'new state of msg {state_id}:')
+    logger.info(state[state_id])
+    logger.info(f'reply msg: {msg}')
+
     await bot.edit_message_text(
         chat_id=callback_query.message.chat.id,
         message_id=callback_query.message.message_id,
