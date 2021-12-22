@@ -17,7 +17,8 @@ from aiogram.types import ReplyKeyboardRemove, \
     InlineKeyboardMarkup, InlineKeyboardButton
 
 
-from config import TOKEN, H3_RESOLUTION, USER_CHOICE_SIZE
+from config import TOKEN, H3_RESOLUTION, \
+    USER_CHOICE_SIZE, RECOMMEND_TOP_K, HIST_POOL_TOP_K
 
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,17 @@ def generate_kb_top_rest(chains, max_btn_in_row=2, max_btn_in_kb=6):
         kb.row(*btns, )
     kb.add(InlineKeyboardButton('Обновить 🔄', callback_data='btn_kb_top_rest_refresh'))
     return kb
+
+
+def drop_same_names(top_rec, top_k=30):
+    selected_chains = set()
+    h3_top_chains = []
+    for id in top_rec:
+        chain_name = chain_id_to_name[id]
+        if chain_name not in selected_chains:
+            h3_top_chains.append(id)
+            selected_chains.add(chain_name)
+    return h3_top_chains[:top_k]
 
 
 @dp.message_handler(commands=['start'])
@@ -174,17 +186,8 @@ async def process_location(message: types.Message):
     msg = f'lat: {lat}'
     msg += f'\nlng: {lng}'
     if h3 in h3_to_chains:   
-        top_rec = model.top_rec(h3)
-        top_uniq_names = set()
-        h3_top_chains = []
-        # drop chain ids with same names
-        # for pretty output
-        for id in top_rec:
-            chain_name = chain_id_to_name[id]
-            if chain_name not in top_uniq_names:
-                h3_top_chains.append(id)
-                top_uniq_names.add(chain_name)
-        
+        top_rec = model.top_rec(h3, top_k=HIST_POOL_TOP_K)
+        h3_top_chains = drop_same_names(top_rec, top_k=RECOMMEND_TOP_K)
         demo_user_state[demo_user_id] = defaultdict()
         demo_user_state[demo_user_id]['h3'] = h3
         demo_user_state[demo_user_id]['h3_top_chains'] = set(h3_top_chains)
@@ -235,9 +238,13 @@ async def process_callback_top_rest(callback_query: types.CallbackQuery):
         if USER_CHOICE_SIZE <= len(user_h3_hist_chains):
             logger.info('enough history gathered for prediction')
             preds = model.predict(h3=demo_user_state[demo_user_id]['h3'],
-                                  user_orders_history=user_h3_hist_chains)
+                                  user_orders_history=user_h3_hist_chains,
+                                  top_k=2*RECOMMEND_TOP_K)
+            preds = drop_same_names(preds, top_k=RECOMMEND_TOP_K)
             preds = [chain_id_to_name[chain_id] for chain_id in preds]
-            text = '\nРекомендации:\n' + '\n'.join([f'    {i+1}. {s}' for i, s in enumerate(preds)])
+            hist = [chain_id_to_name[chain_id] for chain_id in user_h3_hist_chains]
+            text = '\nВыбранные рестораны:\n' + '\n'.join([f'    {i+1}. {s}' for i, s in enumerate(hist)])
+            text += '\n\nРекомендации:\n' + '\n'.join([f'    {i+1}. {s}' for i, s in enumerate(preds)])
             markup = None
             
         else:

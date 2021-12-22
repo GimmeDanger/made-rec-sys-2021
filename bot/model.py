@@ -83,13 +83,22 @@ class Model:
             )
         ][:top_k]
 
-    def _user_id_by_history(self, h3, user_orders_history):
+    def _user_id_by_history(self, h3, filter_set):
         logger.info('Searching user id by history')
         city_id = self.h3_to_city_id[h3]
-        interactions = self._get_interactions(city_id)
-        return interactions.interaction_df.user_id.unique()[0]
+        interactions = self._get_interactions(city_id).interaction_df
+        interactions = interactions.query('chain_id in @filter_set')
+        logger.info(f'Interactions len after sparsing query: {len(interactions)}')
+        interactions = interactions[['user_id', 'weight']]
+        interactions['weight'] = 1 # we need count of chain match 
+        interactions = interactions.groupby('user_id').sum()
+        interactions = interactions.reset_index()[['user_id', 'weight']]
+        interactions = interactions.sort_values(by=['weight'], ascending=False)
+        logger.info('Top look alike users')
+        logger.info(interactions.head())
+        return interactions.user_id[0]
     
-    def _predict(self, h3, user_id, chains_to_filter, top_k=30):
+    def _predict(self, h3, user_id, filter_out_set, top_k=30):
 
         logger.info('Prediction start')
 
@@ -98,7 +107,6 @@ class Model:
         top_rec = self._get_top_rec(city_id)
         interactions = self._get_interactions(city_id)
         user_features_sparse = self._get_user_features(city_id)
-        filter_set = set(chains_to_filter)
 
         if h3 in self.h3_valid:
             logger.info('h3 is valid')
@@ -110,7 +118,7 @@ class Model:
                 pred = lightfm.predict(user_index, valid_chain_index, user_features=user_features_sparse)
                 top_chain_index = [x for _, x in sorted(zip(pred, valid_chain_index), reverse=True)]
                 top = [interactions.index_to_chain[k] for k in top_chain_index]
-                top = [k for k in top if k not in filter_set][:top_k]
+                top = [k for k in top if k not in filter_out_set][:top_k]
                 
             else:
                 logger.info('user_id is not valid, run top_rec for h3 chains')
@@ -121,7 +129,7 @@ class Model:
                         reverse=True
                     )
                 ]
-                top = [k for k in top if k not in filter_set][:top_k]
+                top = [k for k in top if k not in filter_out_set][:top_k]
         else:
             logger.info('h3 is not valid, run top_rec for all chains')
             top = [
@@ -131,9 +139,10 @@ class Model:
                     reverse=True
                 )
             ]
-            top = [k for k in top if k not in filter_set][:top_k]
+            top = [k for k in top if k not in filter_out_set][:top_k]
         return top
 
     def predict(self, h3, user_orders_history, top_k=30):
-        user_id = self._user_id_by_history(h3, user_orders_history)
-        return self._predict(h3, user_id, user_orders_history, top_k)
+        filter_set = set(user_orders_history)
+        user_id = self._user_id_by_history(h3, filter_set)
+        return self._predict(h3, user_id, filter_set, top_k)
