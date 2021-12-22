@@ -224,28 +224,34 @@ async def process_callback_top_rest(callback_query: types.CallbackQuery):
     if data.startswith('btn_kb_top_rest_refresh'):
         logger.info('btn refresh')
         ids = list(user_h3_top_chains - user_h3_hist_chains)
+        text = callback_query.message.text
         markup = generate_kb_top_rest(ids)
-        await bot.edit_message_text(
-            chat_id=callback_query.message.chat.id,
-            message_id=callback_query.message.message_id,
-            reply_markup=markup,
-            text=callback_query.message.text)
+
     else:
         chain_id = int(data[len('btn_kb_top_rest_'):])
         user_h3_hist_chains.add(chain_id)
         demo_user_state[demo_user_id]['h3_hist_chains'] = user_h3_hist_chains
         logger.info(f'btn {chain_id}: {chain_id_to_name[chain_id]}')
-        if USER_CHOICE_SIZE >= len(user_h3_hist_chains):
-            await bot.send_message(demo_user_id, 'Рекомендация: xxx')
+        if USER_CHOICE_SIZE <= len(user_h3_hist_chains):
+            logger.info('enough history gathered for prediction')
+            preds = model.predict(h3=demo_user_state[demo_user_id]['h3'],
+                                  user_orders_history=user_h3_hist_chains)
+            preds = [chain_id_to_name[chain_id] for chain_id in preds]
+            text = '\nРекомендации:\n' + '\n'.join([f'    {i+1}. {s}' for i, s in enumerate(preds)])
+            markup = None
+            
         else:
             logger.info('continue adding hist chains from kb')
             ids = list(user_h3_top_chains - user_h3_hist_chains)
+            text = callback_query.message.text
             markup = generate_kb_top_rest(ids)
-            await bot.edit_message_text(
-                chat_id=callback_query.message.chat.id,
-                message_id=callback_query.message.message_id,
-                reply_markup=markup,
-                text=callback_query.message.text)
+    
+    logger.info(f'reply msg: {text}')
+    await bot.edit_message_text(
+        chat_id=callback_query.message.chat.id,
+        message_id=callback_query.message.message_id,
+        reply_markup=markup,
+        text=text)
 
 if __name__ == '__main__':
     executor.start_polling(dp)

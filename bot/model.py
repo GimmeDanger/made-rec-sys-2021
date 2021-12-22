@@ -1,10 +1,17 @@
 import pickle
+import logging
+
+logger = logging.getLogger(__name__)
+log_fmt = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+logging.basicConfig(level=logging.INFO, format=log_fmt)
 
 
 class Model:
     def __init__(self):
+        logger.info('Model initializing')
         with open('data/h3_to_chains.pkl', 'rb') as f:
             self.h3_to_chains = pickle.load(f)
+            self.h3_valid = set([x for x in self.h3_to_chains.keys()])
         with open('data/h3_to_city_id.pkl', 'rb') as f:
             self.h3_to_city_id = pickle.load(f)
         with open('data/lightfm_moscow.pkl', 'rb') as f:
@@ -75,3 +82,58 @@ class Model:
                 reverse=True
             )
         ][:top_k]
+
+    def _user_id_by_history(self, h3, user_orders_history):
+        logger.info('Searching user id by history')
+        city_id = self.h3_to_city_id[h3]
+        interactions = self._get_interactions(city_id)
+        return interactions.interaction_df.user_id.unique()[0]
+    
+    def _predict(self, h3, user_id, chains_to_filter, top_k=30):
+
+        logger.info('Prediction start')
+
+        city_id = self.h3_to_city_id[h3]
+        lightfm = self._get_lightfm(city_id)
+        top_rec = self._get_top_rec(city_id)
+        interactions = self._get_interactions(city_id)
+        user_features_sparse = self._get_user_features(city_id)
+        filter_set = set(chains_to_filter)
+
+        if h3 in self.h3_valid:
+            logger.info('h3 is valid')
+            valid_chains = self.h3_to_chains[h3]
+            valid_chain_index = [v for k, v in interactions.chain_to_index.items() if k in valid_chains]
+            if user_id in interactions.user_to_index and len(valid_chain_index) > 9:
+                logger.info('user_id is valid, run lightfm')
+                user_index = interactions.user_to_index[user_id]
+                pred = lightfm.predict(user_index, valid_chain_index, user_features=user_features_sparse)
+                top_chain_index = [x for _, x in sorted(zip(pred, valid_chain_index), reverse=True)]
+                top = [interactions.index_to_chain[k] for k in top_chain_index]
+                top = [k for k in top if k not in filter_set][:top_k]
+                
+            else:
+                logger.info('user_id is not valid, run top_rec for h3 chains')
+                pred = top_rec.predict(valid_chains)
+                top = [
+                    x for _, x in sorted(
+                        zip(pred, valid_chains),
+                        reverse=True
+                    )
+                ]
+                top = [k for k in top if k not in filter_set][:top_k]
+        else:
+            logger.info('h3 is not valid, run top_rec for all chains')
+            top = [
+                k for k, v in sorted(
+                    top_rec.chains_to_cnt.items(),
+                    key=lambda item: item[1],
+                    reverse=True
+                )
+            ]
+            top = [k for k in top if k not in filter_set][:top_k]
+        return top
+
+    def predict(self, h3, user_orders_history, top_k=30):
+        user_id = self._user_id_by_history(h3, user_orders_history)
+        return self._predict(h3, user_id, user_orders_history, top_k)
