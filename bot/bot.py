@@ -94,8 +94,8 @@ async def process_start_command(message: types.Message):
 @dp.message_handler(commands=['help'])
 async def process_help_command(message: types.Message):
     msg = 'Функции бота\n'
-    msg += '\n* /recommend -- получение рекомендации для свой локации и любимых ресторанов'
-    msg += '\n* /sample -- пример работы на случайном пользователе из выборки'
+    msg += '\n\n* /recommend - получение рекомендации для свой локации и любимых ресторанов'
+    msg += '\n\n* /sample - пример работы на случайном пользователе из выборки'
     await message.reply(msg)
 
 
@@ -247,7 +247,7 @@ async def process_callback_top_rest(callback_query: types.CallbackQuery):
             preds = drop_same_names(preds, top_k=RECOMMEND_TOP_K)
             preds = [chain_id_to_name[chain_id] for chain_id in preds]
             hist = [chain_id_to_name[chain_id] for chain_id in user_h3_hist_chains]
-            text = '\nВыбранные рестораны:\n' + '\n'.join([f'    {i+1}. {s}' for i, s in enumerate(hist)])
+            text = 'Выбранные рестораны: ' + ', '.join([s for s in hist])
             text += '\n\nРекомендации:\n' + '\n'.join([f'    {i+1}. {s}' for i, s in enumerate(preds)])
             markup = None
             
