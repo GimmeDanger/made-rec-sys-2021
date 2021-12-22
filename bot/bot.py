@@ -87,12 +87,16 @@ def drop_same_names(top_rec, top_k=30):
 
 @dp.message_handler(commands=['start'])
 async def process_start_command(message: types.Message):
-    await message.reply("TODO: start")
+    msg = 'Бот для рекомендации ресторанов. Нажмите /help для дополнительной информации'
+    await message.reply(msg)
 
 
 @dp.message_handler(commands=['help'])
 async def process_help_command(message: types.Message):
-    await message.reply("TODO: help")
+    msg = 'Функции бота\n'
+    msg += '\n* /recommend -- получение рекомендации для свой локации и любимых ресторанов'
+    msg += '\n* /sample -- пример работы на случайном пользователе из выборки'
+    await message.reply(msg)
 
 
 @dp.message_handler(commands=['sample'])
